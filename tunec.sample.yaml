@@ -1,1 +1,21 @@
-
+hg_command: "/usr/bin/hg"
+project:
+    exampleproject:
+        connection_type: sftp
+        local:
+            dir: "/www/projects/exampleproject/"
+            vendor_dir: "vendor"
+        remote:
+            vendor_dir: /home/websitename/public_html/vendor/            
+        sftp:
+            host: 192.168.1.10
+            port: 22
+            username: myusername
+            password: "asecretpassword"
+            pubkey: /home/myusername/.ssh/pub.ppk
+            privkey: "/home/myusername/.ssh/privkey"
+        ftp:
+            host: 192.168.1.10
+            port: 22
+            username: myusername
+            password: "asecretpassword"            

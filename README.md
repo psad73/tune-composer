@@ -40,6 +40,7 @@ Seems to be pretty to use. And it does not collide with the git system used in l
 - The script is not very foolproof. some additional checkes (file/folder location, permission, etc) should be added.
 - Empty, unnecessary folder are not deleted. No idea how to solve this problem yet. But it seems a less problem while in develop stage. I assume, updates in production mode are not performed too often. Before entering the prod mode, it is enough to make full update (clean init).
 - Directory permissions are not kept. well...
+- Make ssh2/sftp priv/pub key authentication working
 - Code cleanup. As always.
 
 ## Versions

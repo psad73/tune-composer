@@ -10,7 +10,7 @@ class TuneC
     public $session;
     public $hgCommand;
     public $localWorkingDir;
-    private $stampfile = '.tunec_stamp';
+    private $stampfile = 'tunec_stamp';
 
     public function __construct($project)
     {
@@ -21,15 +21,29 @@ class TuneC
         $this->localWorkingDir = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'];
     }
 
-    public function test()
+    /**
+     * Check status
+     */
+    public function checkStatus()
     {
-        $this->connect();
-        $p = ssh2_sftp_stat($this->session, '/home/psadowski/test/vendor/1');
-        var_dump($p);
-        echo "test\n";
-        die();
+        $this->hgAddRemove();
+        $this->hgCommit();
+        $localStatus = $this->checkLocalRepo();
+        $localSummary = $this->getLocalSummary();
+        $remoteSummary = $this->getRemoteSummary();
+        echo "Last update peformed at: " . $remoteSummary['date'] . " (" . self::time_elapsed_string($remoteSummary['date'], true) . ")\n";
+        echo "Remote checksum/rev : " . $remoteSummary['no'] . ':' . $remoteSummary['revision'] . "\n";
+        echo "Local checksum/rev  : " . $localSummary['no'] . ':' . $localSummary['revision'] . "\n";
+        if ($localStatus && ($localSummary['revision'] == $remoteSummary['revision'])) {
+
+        } else {
+            echo "\nThe local vendor folder has changed since the last update. Remote project may need an update.\n\n";
+        }
     }
 
+    /**
+     * Push local checnges to remote location
+     */
     public function pushChanges()
     {
         $this->commitLocalChanges();
@@ -53,12 +67,61 @@ class TuneC
         $this->updateRemoteStamp($localSummary['no'] . ':' . $localSummary['revision']);
     }
 
+    /**
+     * Init local repo
+     */
+    public function initLocal()
+    {
+        $hg = $this->config['hg_command'];
+        $localVendorDir = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'];
+        if (!is_readable($localVendorDir) || !is_dir($localVendorDir)) {
+            die("vendor dir is missing in local project!\n");
+        }
+        if (is_readable($localVendorDir . '.hg')) {
+            die("HG dir already exists!\n");
+        }
+        chdir($localVendorDir);
+        // hg init
+        shell_exec($hg . ' init');
+        // hg add
+        $p = shell_exec($hg . ' add');
+        echo "HG add\n";
+        echo $p . "\n";
+        //hg commit
+        $p = shell_exec($hg . ' commit -m "init"');
+        echo "HG commit\n" . $p . "\n";
+    }
+
+    /**
+     * Init remote locatio, uploads local files
+     */
+    public function initRemote()
+    {
+        $repoOk = $this->checkLocalRepo();
+        if (!$repoOk) {
+            die("\nLocal vendor dir is changed!\n\n");
+        }
+        if (false && !$this->remoteCheckDir($this->pcfg['remote']['vendor_dir'])) {
+            echo "\nCreating remote dir (" . $this->pcfg['remote']['vendor_dir'] . ")\n";
+            $p = $this->remoteMakeDir($this->pcfg['remote']['vendor_dir']);
+            if ($p) {
+                echo "Success.\n";
+            } else {
+                die("Failed!");
+            }
+        }
+        $files = $this->getLocalRepoFiles();
+        $this->prepareRemoteDirs($files);
+        $this->uploadFiles($files);
+        $localRevision = $this->getLocalRevision();
+        $this->updateRemoteStamp($localRevision);
+    }
+
     public function removeRemoteFiles($files)
     {
-        $this->connect();
         foreach ($files as $file) {
             echo "Removing " . $file . "\n";
-            ssh2_sftp_unlink($this->session, $this->pcfg['remote']['vendor_dir'] . $file);
+            $this->remoteDeleteFile($this->pcfg['remote']['vendor_dir'] . $file);
         }
     }
 
@@ -184,39 +247,13 @@ class TuneC
         return self::text2lines($p);
     }
 
-    public function getRemoteSummary($test = false)
+    public function getRemoteSummary()
     {
-        if ($test) {
-            return json_decode('{"no":"1","revision":"3db4d51e5acf","date":"2020-12-11 02:46:19.000000"}', true);
-        }
-        $this->connect();
         $tempfile = tempnam('.', '.remotestamp_');
-        ssh2_scp_recv($this->connection, $this->pcfg['remote']['vendor_dir'] . $this->stampfile, $tempfile);
+        $this->remoteGetFile($this->pcfg['remote']['vendor_dir'] . $this->stampfile, $tempfile);
         $remoteStamp = json_decode(file_get_contents($tempfile), true);
         unlink($tempfile);
         return $remoteStamp;
-    }
-
-    public function initRemote()
-    {
-        $repoOk = $this->checkLocalRepo();
-        if (!$repoOk) {
-            die("\nLocal vendor dir is changed!\n\n");
-        }
-        if (false && !$this->checkRemoteDir($this->pcfg['remote']['vendor_dir'])) {
-            echo "\nCreating remote dir (" . $this->pcfg['remote']['vendor_dir'] . ")\n";
-            $p = ssh2_sftp_mkdir($this->session, $this->pcfg['remote']['vendor_dir']);
-            if ($p) {
-                echo "Success.\n";
-            } else {
-                die("Failed!");
-            }
-        }
-        $files = $this->getLocalRepoFiles();
-        $this->prepareRemoteDirs($files);
-        $this->uploadFiles($files);
-        $localRevision = $this->getLocalRevision();
-        $this->updateRemoteStamp($localRevision);
     }
 
     public function updateRemoteStamp($revision)
@@ -230,9 +267,8 @@ class TuneC
         $stampJson = json_encode($stamp);
         $tempfile = tempnam(".", '.tunec_');
         file_put_contents($tempfile, $stampJson);
-        $this->connect();
         echo "Uploading stamp file.\n";
-        ssh2_scp_send($this->connection, $tempfile, $this->pcfg['remote']['vendor_dir'] . $this->stampfile);
+        $this->remotePutFile($tempfile, $this->pcfg['remote']['vendor_dir'] . $this->stampfile);
         unlink($tempfile);
     }
 
@@ -252,35 +288,25 @@ class TuneC
 
     public function uploadFiles($files)
     {
-        $this->connect();
-        try {
-            foreach ($files as $file) {
-                $localFileFullPath = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'] . $file;
-                $remoteFileFullPath = $this->pcfg['remote']['vendor_dir'] . $file;
-                $this->checkRemotePath(self::getPath($remoteFileFullPath), true);
-                echo "Uploading " . $remoteFileFullPath . "\n";
-                $success = ssh2_scp_send($this->connection, $localFileFullPath, $remoteFileFullPath);
-                if ($success == false) {
-                    throw new Exception("Could not upload $localFileFullPath.");
-                }
-            }
-        } catch (Exception $e) {
-            error_log('Exception: ' . $e->getMessage());
-            die();
+        foreach ($files as $file) {
+            $localFileFullPath = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'] . $file;
+            $remoteFileFullPath = $this->pcfg['remote']['vendor_dir'] . $file;
+            $this->checkRemotePath(self::getPath($remoteFileFullPath), true);
+            echo "Uploading " . $remoteFileFullPath . "\n";
+            $this->remotePutFile($localFileFullPath, $remoteFileFullPath);
         }
     }
 
     public function checkRemotePath($path, $createDir = false)
     {
-        $pathStatus = $this->checkRemoteDir($path);
+        $pathStatus = $this->remoteCheckDir($path);
         if ($pathStatus) {
             return true;
         } else {
             $parrent = self::getPath($path, true);
             if ($this->checkRemotePath($parrent, $createDir)) {
                 echo "Create $path\n";
-                $this->connect();
-                ssh2_sftp_mkdir($this->session, $path, 0775, true);
+                $this->remoteMakeDir($path);
                 return true;
             };
         }
@@ -300,10 +326,9 @@ class TuneC
 
     public function prepareRemoteDirs($files)
     {
-        $this->connect();
         $dirs = $this->getFileDirs($files);
         foreach ($dirs as $dir) {
-            ssh2_sftp_mkdir($this->session, $this->pcfg['remote']['vendor_dir'] . $dir, 0775, true);
+            $this->remoteMakeDir($this->pcfg['remote']['vendor_dir'] . $dir);
         }
     }
 
@@ -356,48 +381,6 @@ class TuneC
         return false;
     }
 
-    public function initLocal()
-    {
-        $hg = $this->config['hg_command'];
-        $localVendorDir = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'];
-        if (!is_readable($localVendorDir) || !is_dir($localVendorDir)) {
-            die("vendor dir is missing in local project!\n");
-        }
-        if (is_readable($localVendorDir . '.hg')) {
-            die("HG dir already exists!\n");
-        }
-        chdir($localVendorDir);
-        // hg init
-        shell_exec($hg . ' init');
-        // hg add
-        $p = shell_exec($hg . ' add');
-        echo "HG add\n";
-        echo $p . "\n";
-        //hg commit
-        $p = shell_exec($hg . ' commit -m "init"');
-        echo "HG commit\n" . $p . "\n";
-    }
-
-    public function checkRemoteDir($file)
-    {
-        $this->connect();
-        try {
-            $statinfo = @ssh2_sftp_stat($this->session, $file);
-        } catch (Exception $e) {
-
-        }
-        if ($statinfo) {
-            return true;
-        } else {
-            return false;
-        };
-    }
-
-    public function makeRemoteDir($dir)
-    {
-
-    }
-
     public static function getConfig()
     {
         $config = yaml_parse_file('tunec.yaml');
@@ -412,12 +395,17 @@ class TuneC
         switch ($this->pcfg['connection_type']) {
             case 'sftp':
                 $connection = $this->sftp_connection();
+                $this->connection = $connection;
+                $this->session = ssh2_sftp($connection);
+                break;
+            case 'ftp':
+                $connection = $this->ftp_connection();
+                $this->connection = $connection;
+                $this->session = true;
                 break;
             default:
                 $connection = false;
         }
-        $this->connection = $connection;
-        $this->session = ssh2_sftp($connection);
         return $connection;
     }
 
@@ -453,19 +441,150 @@ class TuneC
         return $connection;
     }
 
-    public function checkStatus()
+    public function ftp_connection()
     {
-        $localStatus = $this->checkLocalRepo();
-        $localSummary = $this->getLocalSummary();
-        $remoteSummary = $this->getRemoteSummary();
-        echo "Last update peformed at: " . $remoteSummary['date'] . " (" . self::time_elapsed_string($remoteSummary['date'], true) . ")\n";
-        echo "Remote checksum/rev : " . $remoteSummary['no'] . ':' . $remoteSummary['revision'] . "\n";
-        echo "Local checksum/rev  : " . $localSummary['no'] . ':' . $localSummary['revision'] . "\n";
-        if ($localStatus) {
-
+        if (key_exists('password', $this->pcfg['ftp'])) {
+            $connection = ftp_connect($this->pcfg['ftp']['host'], $this->pcfg['ftp']['port']);
+            try {
+                echo "Connecting...";
+                if (ftp_login($connection, $this->pcfg['ftp']['username'], $this->pcfg['ftp']['password'])) {
+                    echo "success!\n";
+                    return $connection;
+                } else {
+                    throw new Exception('Authentication Failed!');
+                }
+            } catch (Exception $e) {
+                error_log("Exception: " . $e->getMessage());
+                die();
+            }
         } else {
-            echo "\nThe local vendor folder has changed since the last update. Remote project may need an update.\n\n";
+            die('Please provide pubkey or password!');
         }
+        return $connection;
+    }
+
+    public function remotePutFile($localFile, $remoteFile)
+    {
+        $this->connect();
+        try {
+            switch ($this->pcfg['connection_type']) {
+                case 'sftp':
+                    if (ssh2_scp_send($this->connection, $remoteFile, $localFile)) {
+                        return true;
+                    }
+                    break;
+                case 'ftp':
+                    if (ftp_put($this->connection, $remoteFile, $localFile)) {
+                        return true;
+                    }
+                    break;
+            }
+            throw new Exception("Can not upload " . $remoteFile);
+        } catch (Exception $e) {
+            error_log("Exception: " . $e->getMessage());
+            die();
+        }
+    }
+
+    public function remoteGetFile($remoteFile, $localFile)
+    {
+        $this->connect();
+        try {
+            switch ($this->pcfg['connection_type']) {
+                case 'sftp':
+                    if (ssh2_scp_recv($this->connection, $remoteFile, $localFile)) {
+                        return true;
+                    };
+                    break;
+                case 'ftp':
+                    if (ftp_get($this->connection, $localFile, $remoteFile)) {
+                        return true;
+                    };
+                    break;
+                default:
+            }
+            throw new Exception("Can not download " . $remoteFile);
+        } catch (Exception $e) {
+            error_log("Exception: " . $e->getMessage());
+        }
+        return false;
+    }
+
+    public function remoteCheckDir($directory)
+    {
+        $this->connect();
+        switch ($this->pcfg['connection_type']) {
+            case 'sftp':
+                $statinfo = @ssh2_sftp_stat($this->session, $directory);
+                break;
+            case 'ftp':
+                $statinfo = is_dir('ftp://' .$this->pcfg['ftp']['username'] .':'. $this->pcfg['ftp']['password'] . '@' . $this->pcfg['ftp']['host'] . $directory);
+                break;
+            default:
+        }
+        if ($statinfo) {
+            return true;
+        } else {
+            return false;
+        };
+    }
+
+    public function remoteMakeDir($directory, $recursive = true)
+    {
+        $this->connect();
+        try {
+            switch ($this->pcfg['connection_type']) {
+                case 'sftp':
+                    if (ssh2_sftp_mkdir($this->session, $directory)) {
+                        return true;
+                    };
+                    break;
+                case 'ftp':
+                    if($this->remoteCheckDir($directory)){
+                        return true;
+                    }else{
+                        $parrent = self::getPath($directory, true);
+                        if($parrent == "/"){
+                            throw new Exception("Can not make dir!");
+                        }
+                        $this->remoteMakeDir($parrent);
+                    }
+                    if (ftp_mkdir($this->connection, $directory)) {
+                        return true;
+                    };
+                    break;
+                default:
+            }
+            throw new Exception("Can not make directory " . $directory);
+        } catch (Exception $e) {
+            error_log("Exception: " . $e->getMessage());
+            die();
+        }
+        return false;
+    }
+
+    public function remoteDeleteFile($file)
+    {
+        $this->connect();
+        try {
+            switch ($this->pcfg['connection_type']) {
+                case 'sftp':
+                    if (ssh2_sftp_unlink($this->session, $file)) {
+                        return true;
+                    };
+                    break;
+                case 'ftp':
+                    if (ftp_delete($this->connection, $file)) {
+                        return true;
+                    };
+                    break;
+                default:
+            }
+            throw new Exception("Can not delete " . $file);
+        } catch (Exception $e) {
+            error_log("Exception: " . $e->getMessage());
+        }
+        return false;
     }
 
     private static function text2lines($text, $keepEmtpy = false)
@@ -510,5 +629,13 @@ class TuneC
         if (!$full)
             $string = array_slice($string, 0, 1);
         return $string ? implode(', ', $string) . ' ago' : 'just now';
+    }
+
+    public function test()
+    {
+        $p = $this->remoteCheckDir('/test/vendor/1/');
+        var_dump($p);
+        echo "test\n";
+        die();
     }
 }

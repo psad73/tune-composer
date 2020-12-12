@@ -18,6 +18,10 @@ if($argc > 2){
 $tuneC = new TuneC($project);
 
 switch($command){
+    case 'status':
+    case 'checkstatus':
+        $tuneC->checkStatus();
+        break;
     case 'initlocal':
         $tuneC->initLocal();
         break;
@@ -27,15 +31,11 @@ switch($command){
     case 'push':
         $tuneC->pushChanges();
         break;
-    case 'test':
-        $tuneC->test();
-        break;
     case 'showconfig':
         $tuneC->showConfig();
         break;
-    case 'status':
-    case 'checkstatus':
-        $tuneC->checkStatus();
+    case 'test':
+        $tuneC->test();
         break;
     case 'help':
     default:
