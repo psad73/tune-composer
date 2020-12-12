@@ -1,7 +1,11 @@
 # tune-composer (tune c, tunec)
-Script for updating composer/vendor without shell access at production server.
 
+USE AT YOUR OWN RISK!
+
+Script for updating composer/vendor without shell access at production server.
 Ugly written, but working.
+
+Any suggestion, help is appreciated. (contact me psad73@gmail.com)
 
 Requirements:
 - Linux (tested on Ubuntu 20.04)
@@ -40,3 +44,4 @@ Seems to be pretty to use. And it does not collide with the git system used in l
 0.01 - initial, testing
 
 0.02 - first working version
+
