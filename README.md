@@ -11,9 +11,19 @@ Because I'm tired of uploading +800MB of files everytime one library is updated.
 
 Because it does not collide with the git system. 
 
+## How to?
+
+first configure
+
+## Things still have to be done
+
+- The script is not very foolproof. some additional checkes (file/folder location, permission, etc) should be added.
+- Empty, unnecessary folder are not deleted. No idea how to solve this problem yet. But it seems a less problem while in develop stage. I assume, updates in production mode are not performed too often. Before entering the prod mode, it is enough to make full update (clean init).
+- Directory permissions are not kept. well...
+- Code cleanup. As always.
 
 ## Versions
 
 0.01 - initial, testing
 
-0.02 - 
+0.02 - first working version
