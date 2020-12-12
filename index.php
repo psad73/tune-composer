@@ -25,15 +25,17 @@ switch($command){
         $tuneC->initRemote();
         break;
     case 'push':
-        $tuneC->push();
-        break;
-    case 'status':
+        $tuneC->pushChanges();
         break;
     case 'test':
         $tuneC->test();
         break;
     case 'showconfig':
         $tuneC->showConfig();
+        break;
+    case 'status':
+    case 'checkstatus':
+        $tuneC->checkStatus();
         break;
     case 'help':
     default:
