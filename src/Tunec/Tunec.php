@@ -1,6 +1,8 @@
 <?php
 
-class TuneC
+namespace Tunec;
+
+class Tunec
 {
 
     public $config;
@@ -23,6 +25,7 @@ class TuneC
 
     /**
      * Check status
+     * @return boolean
      */
     public function checkStatus()
     {
@@ -31,27 +34,32 @@ class TuneC
         $localStatus = $this->checkLocalRepo();
         $localSummary = $this->getLocalSummary();
         $remoteSummary = $this->getRemoteSummary();
-        echo "Last update peformed at: " . $remoteSummary['date'] . " (" . self::time_elapsed_string($remoteSummary['date'], true) . ")\n";
+        echo "Last update peformed at: " . $remoteSummary['date'] . " ";
+        echo "(" . self::timeElapsedString($remoteSummary['date'], true) . ")\n";
         echo "Remote checksum/rev : " . $remoteSummary['no'] . ':' . $remoteSummary['revision'] . "\n";
         echo "Local checksum/rev  : " . $localSummary['no'] . ':' . $localSummary['revision'] . "\n";
         if ($localStatus && ($localSummary['revision'] == $remoteSummary['revision'])) {
-
+            echo "\nNo changes found.\n\n";
         } else {
             echo "\nThe local vendor folder has changed since the last update. Remote project may need an update.\n\n";
         }
+        return true;
     }
 
     /**
      * Push local checnges to remote location
+     * @return boolean
      */
     public function pushChanges()
     {
         $this->commitLocalChanges();
         $localSummary = $this->getLocalSummary();
         $remoteSummary = $this->getRemoteSummary();
-        if (($localSummary['no'] == $remoteSummary['no']) && ($localSummary['revision'] == $remoteSummary['revision'])) {
+        if (($localSummary['no'] == $remoteSummary['no']) &&
+            ($localSummary['revision'] == $remoteSummary['revision'])) {
             echo "\nIt looks like no update is required.\n";
-            echo 'The remote directoy was updated at: ' . $remoteSummary['date'] . ' (rev ' . $remoteSummary['no'] . ':' . $remoteSummary['revision'] . ')' . "\n";
+            echo 'The remote directoy was updated at: ' . $remoteSummary['date'];
+            echo ' (rev ' . $remoteSummary['no'] . ':' . $remoteSummary['revision'] . ')' . "\n";
             echo "No update actions were performed!\n\n";
             die();
         }
@@ -69,10 +77,10 @@ class TuneC
 
     /**
      * Init local repo
+     * @return boolean
      */
     public function initLocal()
     {
-        $hg = $this->config['hg_command'];
         $localVendorDir = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'];
         if (!is_readable($localVendorDir) || !is_dir($localVendorDir)) {
             die("vendor dir is missing in local project!\n");
@@ -80,16 +88,15 @@ class TuneC
         if (is_readable($localVendorDir . '.hg')) {
             die("HG dir already exists!\n");
         }
-        chdir($localVendorDir);
         // hg init
-        shell_exec($hg . ' init');
-        // hg add
-        $p = shell_exec($hg . ' add');
+        $this->hgInit();
         echo "HG add\n";
-        echo $p . "\n";
+        $hgAddOutput = $this->hgAddAll();
+        echo $hgAddOutput . "\n";
         //hg commit
-        $p = shell_exec($hg . ' commit -m "init"');
-        echo "HG commit\n" . $p . "\n";
+        echo "HG commit\n";
+        $hgCommitOutput = $this->hg('commit -m "init"');
+        echo $hgCommitOutput . "\n";
     }
 
     /**
@@ -115,9 +122,14 @@ class TuneC
         $this->uploadFiles($files);
         $localRevision = $this->getLocalRevision();
         $this->updateRemoteStamp($localRevision);
+        return true;
     }
 
-    public function removeRemoteFiles($files)
+    /**
+     *
+     * @param array $files
+     */
+    public function removeRemoteFiles(array $files)
     {
         foreach ($files as $file) {
             echo "Removing " . $file . "\n";
@@ -125,6 +137,12 @@ class TuneC
         }
     }
 
+    /**
+     *
+     * @param string $revison
+     * @param string $tillRev
+     * @return array
+     */
     public function getLocalChangesSince($revison, $tillRev = 'tip')
     {
         $changedFiles = $this->hgStatusRev($revison, $tillRev);
@@ -134,12 +152,19 @@ class TuneC
             'M' => [],
         ];
         foreach ($changedFiles as $change) {
+            $m = [];
             preg_match("/([ARM])\ (.+)/", $change, $m);
             $changes[$m[1]][] = $m[2];
         }
         return $changes;
     }
 
+    /**
+     *
+     * @param sring $revision
+     * @param string $tillRev
+     * @return string
+     */
     public function hgStatusRev($revision, $tillRev = 'tip')
     {
         $p = $this->hg('status --rev ' . $revision . ':' . $tillRev);
@@ -149,11 +174,13 @@ class TuneC
 
     /**
      *
+     * @return array
      */
     public function getLocalSummary()
     {
         $summaryLines = $this->hgSummary();
         foreach ($summaryLines as $line) {
+            $m = [];
             preg_match("/^parent\:\ ([0-9]+)\:([a-z0-9]+)/", $line, $m);
             if (count($m) > 0) {
                 $status['no'] = $m[1];
@@ -163,6 +190,9 @@ class TuneC
         return $status;
     }
 
+    /**
+     *
+     */
     public function commitLocalChanges()
     {
         $this->hgAddRemove();
@@ -180,11 +210,20 @@ class TuneC
         return $summary;
     }
 
+    /**
+     *
+     * @return boolean
+     */
     public function hgAddRemove()
     {
         return $this->hg('addremove');
     }
 
+    /**
+     *
+     * @param string $comment
+     * @return boolean
+     */
     public function hgCommit($comment = false)
     {
         if (!$comment) {
@@ -193,24 +232,44 @@ class TuneC
         return $this->hg('commit -m "' . $comment . '"');
     }
 
-    public function hgAddAll()
+    /**
+     *
+     * @return type
+     */
+    public function hgInit()
     {
-        return $this->hg('add *');
+        \chdir($this->localWorkingDir);
+        return $this->hg('init');
     }
 
+    /**
+     *
+     * @return type
+     */
+    public function hgAddAll()
+    {
+        return $this->hg('add');
+    }
+
+    /**
+     *
+     * @param type $files
+     */
     public function hgRemoveFiles($files)
     {
-        chdir($this->localWorkingDir);
         foreach ($files as $file) {
-            shell_exec($this->hgCommand . ' remove "' . $file . '"');
+            $this->hg('remove ' . addslashes($file));
         }
     }
 
-    public function hgAddFiles($files)
+    /**
+     *
+     * @param array $files
+     */
+    public function hgAddFiles(array $files)
     {
-        chdir($this->localWorkingDir);
         foreach ($files as $file) {
-            shell_exec($this->hgCommand . ' add "' . $file . '"');
+            $this->hg('add ' . $file);
         }
     }
 
@@ -228,34 +287,19 @@ class TuneC
         return $files;
     }
 
-    public function manageLocalVendorAdditions()
-    {
-        $newFiles = $this->getNewFiles();
-        var_dump($newFiles);
-    }
-
-    public function manageLocalVendorDeletions()
-    {
-        $delFiles = $this->getDeletedFiles();
-        var_dump($delFiles);
-    }
-
-    public function getDeletedFiles()
-    {
-        chdir($this->localWorkingDir);
-        $p = shell_exec($this->hgCommand . ' status -d');
-        return self::text2lines($p);
-    }
-
     public function getRemoteSummary()
     {
-        $tempfile = tempnam('.', '.remotestamp_');
+        $tempfile = tempnam(sys_get_temp_dir(), '.remotestamp_');
         $this->remoteGetFile($this->pcfg['remote']['vendor_dir'] . $this->stampfile, $tempfile);
         $remoteStamp = json_decode(file_get_contents($tempfile), true);
         unlink($tempfile);
         return $remoteStamp;
     }
 
+    /**
+     *
+     * @param string $revision
+     */
     public function updateRemoteStamp($revision)
     {
         $revArray = preg_split("/\:/", $revision);
@@ -265,20 +309,30 @@ class TuneC
             'date' => date('Y-m-d H:i:s')
         ];
         $stampJson = json_encode($stamp);
-        $tempfile = tempnam(".", '.tunec_');
+        $tempfile = tempnam(sys_get_temp_dir(), '.tunec_');
         file_put_contents($tempfile, $stampJson);
         echo "Uploading stamp file.\n";
         $this->remotePutFile($tempfile, $this->pcfg['remote']['vendor_dir'] . $this->stampfile);
         unlink($tempfile);
     }
 
+    /**
+     *
+     * @return array
+     */
     public function getLocalRevision()
     {
+        $m = [];
         $p = $this->hg('summary');
         preg_match("/parent\:\ (.*)\ tip/", $p, $m);
         return $m[1];
     }
 
+    /**
+     *
+     * @param string $command
+     * @return string
+     */
     public function hg($command)
     {
         chdir($this->localWorkingDir);
@@ -286,6 +340,10 @@ class TuneC
         return $result;
     }
 
+    /**
+     *
+     * @param type $files
+     */
     public function uploadFiles($files)
     {
         foreach ($files as $file) {
@@ -297,6 +355,12 @@ class TuneC
         }
     }
 
+    /**
+     *
+     * @param type $path
+     * @param type $createDir
+     * @return boolean
+     */
     public function checkRemotePath($path, $createDir = false)
     {
         $pathStatus = $this->remoteCheckDir($path);
@@ -308,11 +372,17 @@ class TuneC
                 echo "Create $path\n";
                 $this->remoteMakeDir($path);
                 return true;
-            };
+            }
         }
         return false;
     }
 
+    /**
+     *
+     * @param type $file
+     * @param type $useDirsAsFiles
+     * @return type
+     */
     public static function getPath($file, $useDirsAsFiles = false)
     {
         $filename = basename($file);
@@ -324,6 +394,10 @@ class TuneC
         return $path;
     }
 
+    /**
+     *
+     * @param type $files
+     */
     public function prepareRemoteDirs($files)
     {
         $dirs = $this->getFileDirs($files);
@@ -332,6 +406,12 @@ class TuneC
         }
     }
 
+    /**
+     *
+     * @param type $files
+     * @param type $base
+     * @return type
+     */
     public function getFileDirs($files, $base = '')
     {
         $dirs = [];
@@ -342,11 +422,14 @@ class TuneC
                 $dirs[] = join("/", $parts) . "/";
             }
         }
-        sort($dirs);
-        $dirs = array_unique($dirs);
-        return $dirs;
+        \sort($dirs);
+        return array_unique($dirs);
     }
 
+    /**
+     *
+     * @return array
+     */
     public function getLocalRepoFiles()
     {
         $hg = $this->config['hg_command'];
@@ -355,7 +438,8 @@ class TuneC
         $p = shell_exec($hg . ' status --all');
         $lines = self::text2lines($p);
         $files = [];
-        foreach ($lines as $key => $line) {
+        foreach ($lines as $line) {
+            $m = [];
             preg_match("/^C\ (.*)/", $line, $m);
             if (count($m) > 1) {
                 $files[] = $m[1];
@@ -364,11 +448,10 @@ class TuneC
         return $files;
     }
 
-    public function getLocalRepoDirs()
-    {
-        $files = $this->getLocalRepoFiles();
-    }
-
+    /**
+     *
+     * @return boolean
+     */
     public function checkLocalRepo()
     {
         $hg = $this->config['hg_command'];
@@ -394,12 +477,12 @@ class TuneC
         }
         switch ($this->pcfg['connection_type']) {
             case 'sftp':
-                $connection = $this->sftp_connection();
+                $connection = $this->sftpConnection();
                 $this->connection = $connection;
                 $this->session = ssh2_sftp($connection);
                 break;
             case 'ftp':
-                $connection = $this->ftp_connection();
+                $connection = $this->ftpConnection();
                 $this->connection = $connection;
                 $this->session = true;
                 break;
@@ -409,7 +492,7 @@ class TuneC
         return $connection;
     }
 
-    public function sftp_connection()
+    public function sftpConnection()
     {
         if (key_exists('password', $this->pcfg['sftp'])) {
             $connection = ssh2_connect($this->pcfg['sftp']['host'], $this->pcfg['sftp']['port']);
@@ -419,17 +502,17 @@ class TuneC
                     echo "success!\n";
                     return $connection;
                 } else {
-                    throw new Exception('Authentication Failed!');
+                    throw new \Exception('Authentication Failed!');
                 }
-            } catch (Exception $e) {
+            } catch (\Exception $e) {
                 error_log("Exception: " . $e->getMessage());
                 die();
             }
         } elseif (key_exists('pubkey', $this->pcfg['sftp']) && is_readable($this->pcfg['sftp']['pubkey'])) {
-            if (ssh2_auth_pubkey_file($connection,
-                    $this->pcfg['sftp']['username'],
-                    $this->pcfg['sftp']['pubkey'],
-                    $this->pcfg['sftp']['privkey'])) {
+            $user = $this->pcfg['sftp']['username'];
+            $pubKey = $this->pcfg['sftp']['pubkey'];
+            $privKey = $this->pcfg['sftp']['privkey'];
+            if (ssh2_auth_pubkey_file($connection, $user, $pubKey, $privKey)) {
                 echo "Public Key Authentication Successful\n";
                 return $connection;
             } else {
@@ -441,7 +524,7 @@ class TuneC
         return $connection;
     }
 
-    public function ftp_connection()
+    public function ftpConnection()
     {
         if (key_exists('password', $this->pcfg['ftp'])) {
             $connection = ftp_connect($this->pcfg['ftp']['host'], $this->pcfg['ftp']['port']);
@@ -451,9 +534,9 @@ class TuneC
                     echo "success!\n";
                     return $connection;
                 } else {
-                    throw new Exception('Authentication Failed!');
+                    throw new \Exception('Authentication Failed!');
                 }
-            } catch (Exception $e) {
+            } catch (\Exception $e) {
                 error_log("Exception: " . $e->getMessage());
                 die();
             }
@@ -479,8 +562,8 @@ class TuneC
                     }
                     break;
             }
-            throw new Exception("Can not upload " . $remoteFile);
-        } catch (Exception $e) {
+            throw new \Exception("Can not upload " . $remoteFile);
+        } catch (\Exception $e) {
             error_log("Exception: " . $e->getMessage());
             die();
         }
@@ -494,17 +577,17 @@ class TuneC
                 case 'sftp':
                     if (ssh2_scp_recv($this->connection, $remoteFile, $localFile)) {
                         return true;
-                    };
+                    }
                     break;
                 case 'ftp':
                     if (ftp_get($this->connection, $localFile, $remoteFile)) {
                         return true;
-                    };
+                    }
                     break;
                 default:
             }
-            throw new Exception("Can not download " . $remoteFile);
-        } catch (Exception $e) {
+            throw new \Exception("Can not download " . $remoteFile);
+        } catch (\Exception $e) {
             error_log("Exception: " . $e->getMessage());
         }
         return false;
@@ -518,7 +601,16 @@ class TuneC
                 $statinfo = @ssh2_sftp_stat($this->session, $directory);
                 break;
             case 'ftp':
-                $statinfo = is_dir('ftp://' .$this->pcfg['ftp']['username'] .':'. $this->pcfg['ftp']['password'] . '@' . $this->pcfg['ftp']['host'] . $directory);
+                $command = join([
+                    'ftp://',
+                    $this->pcfg['ftp']['username'],
+                    ':',
+                    $this->pcfg['ftp']['password'],
+                    '@',
+                    $this->pcfg['ftp']['host'],
+                    $directory
+                ]);
+                $statinfo = is_dir($command);
                 break;
             default:
         }
@@ -537,26 +629,26 @@ class TuneC
                 case 'sftp':
                     if (ssh2_sftp_mkdir($this->session, $directory)) {
                         return true;
-                    };
+                    }
                     break;
                 case 'ftp':
-                    if($this->remoteCheckDir($directory)){
+                    if ($this->remoteCheckDir($directory)) {
                         return true;
-                    }else{
+                    } else {
                         $parrent = self::getPath($directory, true);
-                        if($parrent == "/"){
-                            throw new Exception("Can not make dir!");
+                        if ($parrent == "/") {
+                            throw new \Exception("Can not make dir!");
                         }
                         $this->remoteMakeDir($parrent);
                     }
                     if (ftp_mkdir($this->connection, $directory)) {
                         return true;
-                    };
+                    }
                     break;
                 default:
             }
-            throw new Exception("Can not make directory " . $directory);
-        } catch (Exception $e) {
+            throw new \Exception("Can not make directory " . $directory);
+        } catch (\Exception $e) {
             error_log("Exception: " . $e->getMessage());
             die();
         }
@@ -571,17 +663,17 @@ class TuneC
                 case 'sftp':
                     if (ssh2_sftp_unlink($this->session, $file)) {
                         return true;
-                    };
+                    }
                     break;
                 case 'ftp':
                     if (ftp_delete($this->connection, $file)) {
                         return true;
-                    };
+                    }
                     break;
                 default:
             }
-            throw new Exception("Can not delete " . $file);
-        } catch (Exception $e) {
+            throw new \Exception("Can not delete " . $file);
+        } catch (\Exception $e) {
             error_log("Exception: " . $e->getMessage());
         }
         return false;
@@ -600,10 +692,10 @@ class TuneC
         return $lines;
     }
 
-    public static function time_elapsed_string($datetime, $full = false)
+    public static function timeElapsedString($datetime, $full = false)
     {
-        $now = new DateTime;
-        $ago = new DateTime($datetime);
+        $now = new \DateTime;
+        $ago = new \DateTime($datetime);
         $diff = $now->diff($ago);
 
         $diff->w = floor($diff->d / 7);
@@ -626,16 +718,10 @@ class TuneC
             }
         }
 
-        if (!$full)
+        if (!$full) {
             $string = array_slice($string, 0, 1);
-        return $string ? implode(', ', $string) . ' ago' : 'just now';
-    }
+        }
 
-    public function test()
-    {
-        $p = $this->remoteCheckDir('/test/vendor/1/');
-        var_dump($p);
-        echo "test\n";
-        die();
+        return $string ? implode(', ', $string) . ' ago' : 'just now';
     }
 }
