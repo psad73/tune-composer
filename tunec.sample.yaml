@@ -2,6 +2,7 @@ hg_command: "/usr/bin/hg"
 project:
     exampleproject:
         connection_type: sftp
+        include_composerjson: true
         local:
             dir: "/www/projects/exampleproject/"
             vendor_dir: "vendor"

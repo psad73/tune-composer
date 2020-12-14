@@ -34,10 +34,14 @@ class Tunec
         $localStatus = $this->checkLocalRepo();
         $localSummary = $this->getLocalSummary();
         $remoteSummary = $this->getRemoteSummary();
+        $localComposerChecksum = $this->getLocalComposerChecksum();
+        $remoteComposerChecksum = $remoteSummary['composerchecksum'];
         echo "Last update peformed at: " . $remoteSummary['date'] . " ";
         echo "(" . self::timeElapsedString($remoteSummary['date'], true) . ")\n";
         echo "Remote checksum/rev : " . $remoteSummary['no'] . ':' . $remoteSummary['revision'] . "\n";
         echo "Local checksum/rev  : " . $localSummary['no'] . ':' . $localSummary['revision'] . "\n";
+        echo "Remote composer.json checksum : " . $remoteComposerChecksum . "\n";
+        echo "Local composer.json checksum  : " . $localComposerChecksum . "\n";
         if ($localStatus && ($localSummary['revision'] == $remoteSummary['revision'])) {
             echo "\nNo changes found.\n\n";
         } else {
@@ -72,7 +76,11 @@ class Tunec
         $this->uploadFiles($changes['M']);
         $this->uploadFiles($changes['A']);
         $this->removeRemoteFiles($changes['R']);
-        $this->updateRemoteStamp($localSummary['no'] . ':' . $localSummary['revision']);
+        if ($this->pcfg['include_composerjson']) {
+            $this->uploadComposerConf();
+        }
+        $composerChecksum = $this->getLocalComposerChecksum();
+        $this->updateRemoteStamp($localSummary['no'] . ':' . $localSummary['revision'], $composerChecksum);
     }
 
     /**
@@ -121,7 +129,8 @@ class Tunec
         $this->prepareRemoteDirs($files);
         $this->uploadFiles($files);
         $localRevision = $this->getLocalRevision();
-        $this->updateRemoteStamp($localRevision);
+        $composerChecksum = $this->getLocalComposerChecksum();
+        $this->updateRemoteStamp($localRevision, $composerChecksum);
         return true;
     }
 
@@ -300,13 +309,14 @@ class Tunec
      *
      * @param string $revision
      */
-    public function updateRemoteStamp($revision)
+    public function updateRemoteStamp($revision, $composerChecksum)
     {
         $revArray = preg_split("/\:/", $revision);
         $stamp = [
             'no' => $revArray[0],
             'revision' => $revArray[1],
-            'date' => date('Y-m-d H:i:s')
+            'date' => date('Y-m-d H:i:s'),
+            'composerchecksum' => $composerChecksum
         ];
         $stampJson = json_encode($stamp);
         $tempfile = tempnam(sys_get_temp_dir(), '.tunec_');
@@ -353,6 +363,16 @@ class Tunec
             echo "Uploading " . $remoteFileFullPath . "\n";
             $this->remotePutFile($localFileFullPath, $remoteFileFullPath);
         }
+    }
+
+    public function uploadComposerConf()
+    {
+        $localComposerJsonFile = $this->pcfg['local']['dir'] . 'composer.json';
+        $remoteComposerJsonFile = $this->pcfg['remote']['vendor_dir'] . '../composer.json';
+        $this->remotePutFile($localComposerJsonFile, $remoteComposerJsonFile);
+        $localComposerLockFile = $this->pcfg['local']['dir'] . 'composer.lock';
+        $remoteComposerLockFile = $this->pcfg['remote']['vendor_dir'] . '../composer.lock';
+        $this->remotePutFile($localComposerLockFile, $remoteComposerLockFile);
     }
 
     /**
@@ -446,6 +466,23 @@ class Tunec
             }
         }
         return $files;
+    }
+
+    public function getLocalComposerChecksum()
+    {
+        if ($this->pcfg['include_composerjson'] == false) {
+            return null;
+        }
+        $localVendorDir = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'];
+        $md5sum = md5_file($localVendorDir . '../composer.json');
+        return $md5sum;
+    }
+
+    public function getRemoteComposerChecksum()
+    {
+        if ($this->pcfg['include_composerjson'] == false) {
+            return null;
+        }
     }
 
     /**
