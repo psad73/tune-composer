@@ -21,19 +21,19 @@ Seems to be pretty to use. And it does not collide with the git system used in l
 1. First configure the local and remote params in tunec.yaml
 2. Make a first, init for the local vendor directory. The local vendor direcotry will be put under version control
 
-    ``# php index.php projectname initlocal``
+    ``# tunec projectname initlocal``
 
 3. Make remote init - the first update will copy all files to the remote location
 
-	``# php index.php projectname initremote``
+	``# tunec projectname initremote``
 
 4. Now, if everything works fine, you may check the sync status
 
-	``# php index.php projectname status``
+	``# tunec projectname status``
 
 5. Or make a regular update after adding/removing a composer library
 
-	``# php index.php projectname push``
+	``# tunec projectname push``
 
 ## Things still have to be done
 
@@ -48,3 +48,8 @@ Seems to be pretty to use. And it does not collide with the git system used in l
 0.01 - initial, testing
 
 0.02 - first working version
+
+0.03 - 
+
+0.1 - update of composer.json file (optional)
+    - change to sort-of command line script. forget about calling a php script.
