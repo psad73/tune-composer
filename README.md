@@ -1,55 +1,39 @@
-# tune-composer (tune c, tunec)
+*** forgett about the tunec php version here. it's working, but... don't***
+
+# tune.py 
 Script for updating composer/vendor without shell access at production server.
 
-Ugly written, but working.
-
 Requirements:
-- Linux (tested on Ubuntu 20.04)
-- php 7.3+ (not tested in other versions)
-- hg (Mercurial SCM https://www.mercurial-scm.org) installed in the local system
+- Linux (tested on Ubuntu 22.04)
+- python3.10 (probably working with 2.7, but not tested)
+- some python libs, like: os, sys, re, json, tarfile, tempfile, requests, urllib.parse, configparser, ftplib
 
 ## Why?
 
 Because I'm tired of uploading +800MB of files everytime one library is updated. Even with zip it takes too much time.
 
-## Why HG/MercurialSCM?
-
-Seems to be pretty to use. And it does not collide with the git system used in lot of composer packages.
-
 ## How to?
 
-1. First configure the local and remote params in tunec.yaml
-2. Make a first, init for the local vendor directory. The local vendor direcotry will be put under version control
+Basic usage: 
+    tunec.py command [options]
 
-    ``# tunec projectname initlocal``
+Available commands:
+    sync - run composer/vendor syncronisation
+    config - show configuration
+    help - well, obviously just a little help
 
-3. Make remote init - the first update will copy all files to the remote location
+Example configuration file (.tune.conf):
+```
+[remote]
+    url = ftp://ftp.myproject.com/
+    user = user@myproject.com
+    password = password123
+    remote-root = /www/html/public/
+    httpcallurl = http://www.myproject.com/
+```
 
-	``# tunec projectname initremote``
+Now, the script will download the remote "composer.lock" file and compare with the local file. Libreries present in the remove `/vendor` directory, but missing localy will be removed at remote host. They are probably no needed, right? Those with different version number are removed as well. However, these are copied from local /vendor folder to the remote. Finally, local `vendor/composer`, `vendor/bin`, `composer.json` and `composer.lock` are uploaded to remote host. No need to upload whole, 1GB+ big `vendor` folder! Hurray!
 
-4. Now, if everything works fine, you may check the sync status
 
-	``# tunec projectname status``
-
-5. Or make a regular update after adding/removing a composer library
-
-	``# tunec projectname push``
-
-## Things still have to be done
-
-- The script is not very foolproof. some additional checkes (file/folder location, permission, etc) should be added.
-- Empty, unnecessary folder are not deleted. No idea how to solve this problem yet. But it seems a less problem while in develop stage. I assume, updates in production mode are not performed too often. Before entering the prod mode, it is enough to make full update (clean init).
-- Directory permissions are not kept. well...
-- Make ssh2/sftp priv/pub key authentication working
-- Code cleanup. As always.
-
-## Versions
-
-0.01 - initial, testing
-
-0.02 - first working version
-
-0.03 - 
-
-0.1 - update of composer.json file (optional)
-    - change to sort-of command line script. forget about calling a php script.
+**Fun fact:** You can place this configuration in `.git/config` replacing the [remote] section name with [git-ftp]. Yes, as some may have noticed, the script use the same configuratio as git-ftp extension. This allows you to use the same configuration for both utils. Saves a lof time to configure both ;) The only, additional config option is "httcallurl" which is not recognized by git-ftp, but should not break it's functions.
+Of course, a `.tunec.conf` in the current directory will override the git-ftp config. Just in case, you need a differnt settings for some, mysterious reason.

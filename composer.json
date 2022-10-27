@@ -1,0 +1,28 @@
+{
+    "name": "psad73/tune-composer",
+    "description": "Tune Composer",
+    "keywords": [
+        "composer",
+        "shared hosting"       
+    ],
+    "license": "",
+    "type": "util",
+    "authors": [
+        {
+            "name": "Paweł Sadowski",
+            "email": "pawel73@gmail.com"
+        }
+    ],
+    "bin": [
+        "tunec"
+    ],
+    "require": {
+        "php": ">7.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Tunec\\Tunec\\": "src"
+        }
+    }
+}
+ 

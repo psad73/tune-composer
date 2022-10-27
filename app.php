@@ -20,6 +20,7 @@ $tuneC = new Tunec($project);
 switch ($command) {
     case 'status':
     case 'checkstatus':
+    case 'check':
         $tuneC->checkStatus();
         break;
     case 'initlocal':
@@ -44,7 +45,10 @@ function printHelp()
     echo "\n";
     echo "tunec <project name> <command>\n";
     echo "commands:\n";
-    echo "\tinitlocal - \n";
-    echo "\tinitremote - \n";
-    echo "\tinitpush - \n";
+    echo "\tshowconfig - list configuration\n";
+    echo "\tcheckstatus - check local and remote status\n";
+    echo "\tinitlocal - init local vendor dir\n";
+    echo "\tinitremote - init remote location\n";
+    echo "\tpush - push local changes to remote\n";
+
 }

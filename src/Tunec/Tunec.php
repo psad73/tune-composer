@@ -18,7 +18,7 @@ class Tunec
     {
         $this->project = $project;
         $this->config = self::getConfig();
-        $this->pcfg = $this->config['project'][$this->project];
+        $this->pcfg = key_exists($this->project, $this->config['project']) ? $this->config['project'][$this->project] : null;
         $this->hgCommand = $this->config['hg_command'];
         $this->localWorkingDir = $this->pcfg['local']['dir'] . $this->pcfg['local']['vendor_dir'];
     }
@@ -345,6 +345,9 @@ class Tunec
      */
     public function hg($command)
     {
+        if (!is_dir($this->localWorkingDir)) {
+            return null;
+        }
         chdir($this->localWorkingDir);
         $result = shell_exec($this->hgCommand . ' ' . $command);
         return $result;
@@ -609,23 +612,21 @@ class Tunec
     public function remoteGetFile($remoteFile, $localFile)
     {
         $this->connect();
-        try {
-            switch ($this->pcfg['connection_type']) {
-                case 'sftp':
-                    if (ssh2_scp_recv($this->connection, $remoteFile, $localFile)) {
-                        return true;
-                    }
-                    break;
-                case 'ftp':
-                    if (ftp_get($this->connection, $localFile, $remoteFile)) {
-                        return true;
-                    }
-                    break;
-                default:
-            }
-            throw new \Exception("Can not download " . $remoteFile);
-        } catch (\Exception $e) {
-            error_log("Exception: " . $e->getMessage());
+        switch ($this->pcfg['connection_type']) {
+            case 'sftp':
+                if (ssh2_scp_recv($this->connection, $remoteFile, $localFile)) {
+                    return true;
+                }
+                break;
+            case 'ftp':
+                if (ftp_get($this->connection, $localFile, $remoteFile)) {
+                    return true;
+                } else {
+                    print_r(error_get_last());
+                    echo "error!";
+                }
+                break;
+            default:
         }
         return false;
     }
