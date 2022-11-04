@@ -1,23 +1,30 @@
 #!/usr/bin/python
 import os, sys, re, json, tarfile, tempfile, requests
 import urllib.parse
+from urllib.parse import urlparse
 from configparser import ConfigParser
 from ftplib import FTP
 
 
 class ComposerSync:
+    configFile = '.tunec.cfg'
     config = []
     ftp = ''
     tempRemoteComposerLockFile = 'composer.remote.lock'
     def __init__(self):
-        #self.readConfig()        
+        self.readConfig()        
         #self.getRemoteConnection()
         return 
-
+    
+    ################
+    #
+    # readConfig
+    #
+    #
     def readConfig(self):
         configObj = ConfigParser()
-        if(os.path.isfile('.tunec.conf')):
-            configObj.read(".tunec.conf")                    
+        if(os.path.isfile(self.configFile)):
+            configObj.read(self.configFile)                    
             self.config = configObj                        
         else:
             gitConfigObj = ConfigParser()
@@ -26,16 +33,36 @@ class ComposerSync:
                 print("You don't have a [git-ftp] in your .git/config nor a .tunec.conf file?! Not good...")
                 exit()
             self.config = ConfigParser()
-            self.config.add_section('remote')            
-            self.config.set('remote', 'url', gitConfigObj['git-ftp']['url'])
-            self.config.set('remote', 'user', gitConfigObj['git-ftp']['user'])
-            self.config.set('remote', 'password', gitConfigObj['git-ftp']['password'])
-            self.config.set('remote', 'remote-root', gitConfigObj['git-ftp']['remote-root'])
+            self.config.add_section('remote')
+            for key in  dict(gitConfigObj['git-ftp']).keys():
+                if(key == 'url'):
+                    parsed_uri = urlparse(gitConfigObj['git-ftp'][key])
+                    host = parsed_uri.netloc
+                    self.config.set('remote', 'host', host) 
+                self.config.set('remote', key, gitConfigObj['git-ftp'][key])            
             if('httpcallurl' in gitConfigObj['git-ftp']):
                 self.config.set('remote', 'httpcallurl', gitConfigObj['git-ftp']['httpcallurl'])
             else:                                
-                httpcallurl = 'http://' + urllib.parse.urlparse(self.gitConfigObj['remote']['url']).netloc  + '/'
+                httpcallurl = 'http://' + urllib.parse.urlparse(self.config['remote']['url']).netloc  + '/'
                 self.config.set('remote', 'httpcallurl', httpcallurl)    
+
+    ###
+    #
+    # makeConfig
+    #
+    #
+    def makeConfig(self):
+        overWrite = True
+        if(os.path.isfile(self.configFile)):
+            user_input = input(f"{self.configFile} exists. Overwrite? (yes/no): ")
+            if user_input.lower() == 'yes':
+                overWrite = True
+            else:
+                overWrite = False
+        if(overWrite):
+            with open(self.configFile, 'w') as configfile:
+                self.config.write(configfile)
+        return True
 
     def getLocalPackages(self):
         f = open('composer.lock')
@@ -172,6 +199,7 @@ class ComposerSync:
                 archive.write(file_path, arcname=file_path.relative_to(directory))
 
     def uploadComposerPackages(self, packages):
+        allOk = True
         tarfilename = next(tempfile._get_candidate_names()) + ".tar.gz"
         apitoken = next(tempfile._get_candidate_names())
                 
@@ -198,32 +226,44 @@ class ComposerSync:
 
         # create php extract file        
         phpfilename = next(tempfile._get_candidate_names()) + ".php"
-        phpfile = open(phpfilename, 'w')        
+        phpfile = open(phpfilename, 'w')  
+        phpFileFtp =  f"{self.config['remote']['publicweb-root']}{phpfilename}"
         phpfile.write(f"<?php if(filter_input(INPUT_SERVER, 'HTTP_X_API_TOKEN') != '{apitoken}') die(); $phar = new PharData('{tarfilename}'); $phar->extractTo('.', null, true); echo 'ok';")
         phpfile.close()
 
         #upload php file        
         fh = open(phpfilename, 'rb')
-        self.ftp.storbinary(f"STOR {phpfilename}", fh)
+        up = self.ftp.storbinary(f"STOR {phpFileFtp}", fh)
+        print(up)
         fh.close()
 
         # curl call to extract
+        
         headers = {'X-API-TOKEN': apitoken}
         data = {'title' : 'value1', 'name':'value2'}
         callUrl = os.path.join(self.config['remote']['httpcallurl'] , phpfilename)        
-        response = requests.post(callUrl, headers=headers, data=json.dumps(data))        
+        print(f"Calling: {callUrl}")
+        response = requests.post(callUrl, headers=headers, data=json.dumps(data))
+        proceed_with_remove = True
         if((response.status_code != 200) and (response.text != 'ok')):
+            allOk = False
             print("Something went wrong while extracting composer archive!")
-                
+            print(response)
+            user_input = input('Remove temp files? (yes/no): ')
+            if user_input.lower() == 'yes':
+                proceed_with_remove = True
+            else:
+                proceed_with_remove = False
         #remove local temps        
-        os.remove(phpfilename)
-        os.remove(tarfilename)
-        os.remove(self.tempRemoteComposerLockFile)
+        if(proceed_with_remove):
+            os.remove(phpfilename)
+            os.remove(tarfilename)
+            os.remove(self.tempRemoteComposerLockFile)
 
         #remove remote temps
-        self.ftp.delete(phpfilename)
-        self.ftp.delete(tarfilename)
-
+            self.ftp.delete(phpFileFtp)
+            self.ftp.delete(tarfilename)
+        return allOk
     ###
     #
     # UPDATE composer files
@@ -280,14 +320,19 @@ class ComposerSync:
         self.uploadComposerPackages(packagesToUpload + packagesToUpdate)
 
     def runSync(self):
-        #sync.compareComposerFiles()
+        if('remote-root' not in dict(self.config['remote']).keys()):
+            print("Error: 'remote-root' is missing in .git/config!\n")
+            exit()
+        sync.compareComposerFiles()
         return True
 
     def showConfig(self):
+        print("Current config is:")
         for section in self.config.sections():
             print("[{}]".format(section))
-            for key in self.config[section]:
-                print("\t{} = {}".format(key, self.config[section][key]))
+            for key in self.config[section]:                
+                print("   {} = {}".format(key, self.config[section][key]))
+        print("\n")        
         return True
     
     def showHelp(self):        
@@ -295,7 +340,8 @@ class ComposerSync:
 \t{} command [options]\n\n\
 Available commands:\n\
 \tsync - run composer/vendor syncronisation\n\
-\tconfig - show configuration\n\
+\tshow-config - show configuration\n\
+\tmake-config - create a .tunec.conf file\n\
 \thelp - well, obviously just a help\n\n\
 Example configuration file:\n\
 [remote]\n\
@@ -316,8 +362,10 @@ For more detailed help and some more explanations please take a look at README.m
         match command:
             case "sync":
                 self.runSync()
-            case "config":
+            case "show-config":
                 self.showConfig()
+            case "make-config":
+                self.makeConfig()
             case "help":        
                 self.showHelp()
             case _:
