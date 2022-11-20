@@ -10,6 +10,32 @@ import urllib.parse
 from urllib.parse import urlparse
 from configparser import ConfigParser
 from ftplib import FTP
+from datetime import datetime
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+class message:
+    def getTD(self):
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    def iWarning(self):
+        return (self.getTD() + bcolors().WARNING + " WARNING: " + bcolors().ENDC)
+    def iError(self):
+        return (self.getTD() + bcolors().FAIL + " ERROR: " + bcolors().ENDC)
+    def iOk(self):
+        return (self.getTD() + bcolors().OKGREEN + " OK: " + bcolors().ENDC)        
+    def iInfo(self):
+        return (self.getTD() + bcolors().OKBLUE + " INFO: " + bcolors().ENDC)        
+    def iDebug(self):
+        return (self.getTD() + bcolors().OKCYAN + " DEBUG: " + bcolors().ENDC)        
 
 
 class ComposerSync:
@@ -18,13 +44,22 @@ class ComposerSync:
         "url": "ftp://ftp.example.net:21/public_html",
         "user": "ftp-user",
         "password": "secr3t",
-        "public-access-url": "",
+        "public-web-url": "",
     }
     ftp = ''
     tempRemoteComposerLockFile = 'composer.remote.lock'
 
+
+    archiveTempFile = ''
+    phpTempFile = ''
+    apiToken = ''
+
+    packagesToRemove = []
+    packagesToUpdate = []
+    packagesToUpload = []
+
     def __init__(self):
-        # self.readConfig()
+        # self.loadConfig()
         # self.getRemoteConnection()
         return
 
@@ -34,17 +69,18 @@ class ComposerSync:
         config.set('remote', 'url', 'ftp.myproject.com')
         config.set('remote', 'user', 'user')
         config.set('remote', 'password', 'password')
-        config.set('remote', 'remote-www', '/var/www/html/')
-        config.set('remote', 'public-access-url', 'https://myproject.com/')
-        config.set('remote', 'public-access-path', '/var/www/html/public/');
+        config.set('remote', 'remote-root', '/var/www/html/')
+        config.set('remote', 'public-web-url', 'https://myproject.com/')
+        config.set('remote', 'public-web-path', '/var/www/html/public/')
+        config.set('remote', 'php-vendor-root', '/var/www/html/public/')
         return config
 
     ################
     #
-    # readConfig
+    # loadConfig
     #
     #
-    def readConfig(self):
+    def loadConfig(self):
         configObj = ConfigParser()
         if (os.path.isfile(self.configFile)):
             configObj.read(self.configFile)
@@ -67,14 +103,14 @@ class ComposerSync:
                     host = parsed_uri.netloc
                     self.config.set('remote', 'host', host)
                 self.config.set('remote', key, gitConfigObj['git-ftp'][key])
-            if ('public-access-url' in gitConfigObj['git-ftp']):
-                self.config.set('remote', 'public-access-url',
-                                gitConfigObj['git-ftp']['public-access-url'])
+            if ('public-web-url' in gitConfigObj['git-ftp']):
+                self.config.set('remote', 'public-web-url',
+                                gitConfigObj['git-ftp']['public-web-url'])
             else:
                 publicaccessurl = 'http://' + \
                     urllib.parse.urlparse(
                         self.config['remote']['url']).netloc + '/'
-                self.config.set('remote', 'public-access-url', publicaccessurl)
+                self.config.set('remote', 'public-web-url', publicaccessurl)
 
     ###
     #
@@ -95,10 +131,12 @@ class ComposerSync:
             print(config['remote']['url'])
             section = 'remote'
             with open(self.configFile, 'w') as configfile:
+                configfile.write("[remote]\n")
                 for key in config[section]:
                     line = "{} = {}".format(key, config[section][key])
-                    print(line)
+                    print(line)                    
                     configfile.write(line)
+                    configfile.write("\n")
         return True
 
     def getLocalPackages(self):
@@ -109,11 +147,11 @@ class ComposerSync:
     def getRemotePackages(self):
         temporaryRemoteComposerFile = self.tempRemoteComposerLockFile
         ftp = self.getRemoteConnection()
-        # ftp.dir()
+        ftp.cwd(self.config['remote']['remote-root'])
         # ftp.retrlines('composer.lock')
         with open(temporaryRemoteComposerFile, 'wb') as fp:
             ftp.retrbinary('RETR composer.lock', fp.write)
-        f = open(temporaryRemoteComposerFile)
+        f = open(temporaryRemoteComposerFile)        
         remoteComposer = json.load(f)
         return remoteComposer
 
@@ -185,10 +223,9 @@ class ComposerSync:
         print(remoteDirs)
 
     def getRemoteConnection(self):
-        ftp = FTP(self.config['remote']['host'])
+        ftp = FTP(self.config['remote']['url'])
         ftp.login(user=self.config['remote']['user'],
-                  passwd=self.config['remote']['password'])
-        ftp.cwd(self.config['remote']['remote-root'])
+                  passwd=self.config['remote']['password'])        
         self.ftp = ftp
         return ftp
 
@@ -202,13 +239,17 @@ class ComposerSync:
         try:
             self.remove_ftp_dir(ftp, 'vendor/' + package['name'])
         except:
-            print("\tProblem removing remote {}".format(package['name']))
+            print(message().iWarning(), end='')
+            print("Problem removing remote {}".format(package['name']))
         else:
-            print(" Package {} removed".format(package['name']))
+            print(message().iOk(), end='')
+            print("Package {} removed".format(package['name']))
 
-    def removeRemotePackages(self, packages):
+    def removeRemotePackages(self):
+        packages = self.packagesToRemove
         for package in packages:
             self.removeRemotePackage(package)
+
     ###
     #
     # UPDATE packages
@@ -220,6 +261,118 @@ class ComposerSync:
     def updateRemotePackages(self, packages):
         for package in packages:
             print("updating: {}".format(package['name']))
+
+
+    def makeArchive(self, items):
+        print(message().iInfo() + f"Creating archive for {items}")
+        for key, path in enumerate(items):
+            if(not os.path.exists(path)):                               
+                print(message().iWarning() + f"Skipping '{path}' while making achive! Item does not exists, or is not accessible. So...")                
+                items.pop(key)
+                print(message().iInfo() + f"Creating archive for {items}") 
+              
+        tarfilename = "tunec_" + next(tempfile._get_candidate_names()) + ".tar.gz"
+        self.archiveTempFile = tarfilename
+        tar = tarfile.open(tarfilename, mode='w:gz')
+        for entry in items:
+            tar.add(entry)
+        tar.close()
+        print(message().iOk() + f"Created archive {tarfilename}")
+        print()
+        return tarfilename
+
+    def uploadFile(self, file, destFolder):        
+        print(message().iInfo() + f"Uploading {file} to remote {destFolder} ...") #, end="")
+        fh = open(file, 'rb')
+        if(destFolder):
+            try:
+                self.ftp.cwd(destFolder)
+            except Exception as e:                
+                sys.exit(f"ERROR: Check remote dirs in config. Is '{destFolder}' a correct folder? [{str(e)}]")
+        try:
+            result = self.ftp.storbinary(f"STOR {file}", fh)
+        except Exception as e:
+            print(message().iError(), end='')
+            print(result)
+            sys.exit()
+        print(message().iOk(), end='')
+        print(result)
+        print()
+        fh.close()
+        return result
+    
+    def makePhpExtractScript(self, apitoken = False):
+        secret = "tunec_" + next(tempfile._get_candidate_names())
+        phpfilename = secret + ".php"
+        self.phpTempFile = phpfilename
+        if(not apitoken):
+            apitoken = next(tempfile._get_candidate_names())            
+            self.apiToken = apitoken
+        archivefile = self.config['remote']['php-vendor-root'].strip("/")  +  "/" + self.archiveTempFile.strip("/")
+        destExtractFolder = self.config['remote']['php-vendor-root'].strip("/") + "/"
+
+        phpfile = open(phpfilename, 'w')
+        phpFileFtp = f"{self.config['remote']['public-web-path']}{phpfilename}"
+        print(message().iDebug() + f"token:{apitoken}")
+        phpfile.write(
+            f"<?php if(filter_input(INPUT_SERVER,'HTTP_X_API_TOKEN')!='{apitoken}'){{header($_SERVER[\"SERVER_PROTOCOL\"].' 500 Internal Server Error',true,500);die('wrong token');}};try{{$phar=new PharData('{archivefile}');}}catch(Exception $e){{header($_SERVER[\"SERVER_PROTOCOL\"].' 500 Internal Server Error',true,500);echo $e->getMessage();die();}};try{{$phar->extractTo('{destExtractFolder}',null,true);}}catch(Exception $e){{header($_SERVER[\"SERVER_PROTOCOL\"].' 500 Internal Server Error',true,500);echo $e->getMessage();die();}};echo'ok';"
+            )
+        phpfile.close()
+        self.uploadFile(phpfilename, self.config['remote']['public-web-path'])
+        return phpfilename
+
+    def extractRemote(self, apitoken = False):
+        if(not apitoken):
+            apitoken = self.apiToken
+        phpfilename = self.phpTempFile
+        print(message().iDebug() + f"token:{apitoken}")
+        headers = {'X-API-TOKEN': apitoken}
+        data = {'title': 'value1', 'name': 'value2'}
+        callUrl = os.path.join(
+            self.config['remote']['public-web-url'], phpfilename)
+        print(f"Trying to extract remote archive. Calling: {callUrl} ... ", end='')
+        response = requests.post(
+            callUrl, headers=headers, data=json.dumps(data))
+        if((response.status_code == 200) and (str(response.content) == "b'ok'")):
+            print(bcolors.OKGREEN + "OK" + bcolors().ENDC)
+            return True
+        else:
+            print(bcolors().FAIL + "ERROR" + bcolors().ENDC)
+            print("Sorry, problem extractiong archive. Check server response below for details")
+            print(str(response.content))
+            sys.exit()
+        return True
+
+    def removeRemote(self, file, folder = False):
+        print(f"Removing remote {file}")
+        if(folder):
+            self.ftp.cwd(folder)
+        result = self.ftp.delete(file)        
+        return result
+
+    #
+    # removes local temp files
+    #
+
+    def cleanUpLocal(self):
+        if(os.path.exists(self.archiveTempFile)):
+            os.remove(self.archiveTempFile)
+        if(os.path.exists(self.phpTempFile)):
+            os.remove(self.phpTempFile)
+        if(os.path.exists(self.tempRemoteComposerLockFile)):
+            os.remove(self.tempRemoteComposerLockFile)
+        return True
+
+    #
+    # removes remote remp files
+    #
+
+    def cleanUpRemote(self):
+        phpFileFtp = "/" + self.config['remote']['public-web-path'].strip("/") + "/" + self.phpTempFile.strip("/")
+        self.ftp.delete(phpFileFtp)
+        tarfilename = "/" + self.config['remote']['remote-root'].strip("/") + "/" + self.archiveTempFile.strip("/")
+        self.ftp.delete(tarfilename)
+        return True
 
     ###
     #
@@ -238,11 +391,9 @@ class ComposerSync:
                 archive.write(
                     file_path, arcname=file_path.relative_to(directory))
 
-    def uploadComposerPackages(self, packages):
+    def uploadComposerPackages(self):
+        packages = self.packagesToUpload + self.packagesToUpdate
         allOk = True
-        tarfilename = next(tempfile._get_candidate_names()) + ".tar.gz"
-        apitoken = next(tempfile._get_candidate_names())
-
         # create list of files to archive
         filelist = [
             'composer.json',
@@ -253,60 +404,11 @@ class ComposerSync:
         for package in packages:
             filelist.append(os.path.join('vendor', package['name']))
 
-        # create tar archive
-        tar = tarfile.open(tarfilename, mode='w:gz')
-        for entry in filelist:
-            tar.add(entry)
-        tar.close()
-
-        # upload tar archive
-        fh = open(tarfilename, 'rb')
-        self.ftp.storbinary(f"STOR {tarfilename}", fh)
-        fh.close()
-
-        # create php extract file
-        phpfilename = next(tempfile._get_candidate_names()) + ".php"
-        phpfile = open(phpfilename, 'w')
-        phpFileFtp = f"{self.config['remote']['publicweb-root']}{phpfilename}"
-        phpfile.write(
-            f"<?php if(filter_input(INPUT_SERVER, 'HTTP_X_API_TOKEN') != '{apitoken}') die(); $phar = new PharData('{tarfilename}'); $phar->extractTo('.', null, true); echo 'ok';")
-        phpfile.close()
-
-        # upload php file
-        fh = open(phpfilename, 'rb')
-        up = self.ftp.storbinary(f"STOR {phpFileFtp}", fh)
-        print(up)
-        fh.close()
-
-        # curl call to extract
-
-        headers = {'X-API-TOKEN': apitoken}
-        data = {'title': 'value1', 'name': 'value2'}
-        callUrl = os.path.join(
-            self.config['remote']['public-access-url'], phpfilename)
-        print(f"Calling: {callUrl}")
-        response = requests.post(
-            callUrl, headers=headers, data=json.dumps(data))
-        proceed_with_remove = True
-        if ((response.status_code != 200) and (response.text != 'ok')):
-            allOk = False
-            print("Something went wrong while extracting composer archive!")
-            print(response)
-            user_input = input('Remove temp files? (yes/no): ')
-            if user_input.lower() == 'yes':
-                proceed_with_remove = True
-            else:
-                proceed_with_remove = False
-        # remove local temps
-        if (proceed_with_remove):
-            os.remove(phpfilename)
-            os.remove(tarfilename)
-            os.remove(self.tempRemoteComposerLockFile)
-
-        # remove remote temps
-            self.ftp.delete(phpFileFtp)
-            self.ftp.delete(tarfilename)
-        return allOk
+        archiveFile = self.makeArchive(filelist)
+        destFolder = self.config['remote']['remote-root']
+        self.uploadFile(archiveFile, destFolder)            
+        return True
+       
     ###
     #
     # UPDATE composer files
@@ -316,6 +418,7 @@ class ComposerSync:
         ftp = self.getRemoteConnection()
 
     def compareComposerFiles(self):
+        print("Comparing composer.lock files...")
         localComposer = self.getLocalPackages()
         remoteComposer = self.getRemotePackages()
         localPackages = {}
@@ -349,27 +452,68 @@ class ComposerSync:
                 packagesToRemove.append(remotePackage)
 
         print("Packages to update:")
-        for package in packagesToUpdate:
-            print("\t{}\t\tlocal: {}\tremote: {}".format(
-                package['name'], localPackages[package['name']]['version'], remotePackages[package['name']]['version']))
+        if(len(packagesToUpdate) == 0):
+            print("(none)")
+        else: 
+            for package in packagesToUpdate:
+                print("\t{}\t\tlocal: {}\tremote: {}".format(package['name'], localPackages[package['name']]['version'], remotePackages[package['name']]['version']))   
+            
         print("\nPackages to upload:")
-        for package in packagesToUpload:
-            print("\t{}\t\tlocal: {}".format(
-                package['name'], localPackages[package['name']]['version']))
-        print("\nPackages to remove:")
-        for package in packagesToRemove:
-            print("\t{}\t\t\tremote: {}".format(
-                package['name'], remotePackages[package['name']]['version']))
+        if(len(packagesToUpdate) == 0):
+            print("(none)")
+        else:
+            for package in packagesToUpload:
+                print("\t{}\t\tlocal: {}".format(package['name'], localPackages[package['name']]['version']))        
 
-        self.removeRemotePackages(packagesToRemove)
-        self.removeRemotePackages(packagesToUpdate)
-        self.uploadComposerPackages(packagesToUpload + packagesToUpdate)
+        print("\nPackages to remove:")
+        if(len(packagesToUpdate) == 0):
+            print("(none)")
+        else:        
+            for package in packagesToRemove:
+                print("\t{}\t\t\tremote: {}".format(package['name'], remotePackages[package['name']]['version']))
+        
+        print("\n")
+        self.packagesToRemove = packagesToRemove
+        self.packagesToUpdate = packagesToUpdate        
+        self.packagesToUpload = packagesToUpload
+        if((len(packagesToRemove) + len(packagesToUpdate)+len(packagesToUpload)) >0):
+            return True
+        else:
+            return False
 
     def runSync(self):
+        self.loadConfig()
         if ('remote-root' not in dict(self.config['remote']).keys()):
             print("Error: 'remote-root' is missing in .git/config!\n")
             exit()
-        sync.compareComposerFiles()
+        isSyncNeeded = self.compareComposerFiles()
+        if(isSyncNeeded):
+            self.removeRemotePackages()
+            self.removeRemotePackages()
+            self.uploadComposerPackages()
+            self.makePhpExtractScript()
+            self.extractRemote()
+            self.cleanUpLocal()
+            self.cleanUpRemote()       
+        else:
+            print("Nothing to do. Everything seems to up to date.\n")
+        print(message().iOk() + "Done.\n")        
+        return True
+
+    def fullUpload(self):
+        self.loadConfig()
+        self.getRemoteConnection()        
+        filelist = [
+            'composer.json',
+            'composer.lock',
+            'vendor'            
+        ]
+        self.makeArchive(filelist)
+        self.uploadFile(self.archiveTempFile, self.config['remote']['remote-root'])        
+        self.makePhpExtractScript()        
+        self.extractRemote()
+        self.cleanUpLocal()
+        self.cleanUpRemote()         
         return True
 
     def showConfig(self):
@@ -385,6 +529,7 @@ class ComposerSync:
         helpTxt = "\nUsage:\n\
 \t{} command [options]\n\n\
 Available commands:\n\
+\tinit - upload full vendor dir\n\
 \tsync - run composer/vendor syncronisation\n\
 \tshow-config - show configuration\n\
 \tmake-config - create a .tunec.conf file\n\
@@ -395,10 +540,15 @@ Example configuration file:\n\
 \tuser = user@myproject.com\n\
 \tpassword = password123\n\
 \tremote-root = /www/html/public/\n\
-\tpublic-access-url = http://www.myproject.com/\n\n\
+\tpublic-web-url = http://www.myproject.com/\n\n\
 For more detailed help and some more explanations please take a look at README.md\n"
         print(helpTxt.format(sys.argv[0]))
         return True
+
+    def test(self):
+        self.loadConfig()
+        self.phpTempFile = 'tunec_8vncl48t.php'
+        self.extractRemote('82cnrin8')
 
     def run(self):
         if (sys.argv.__len__() == 1):
@@ -412,8 +562,12 @@ For more detailed help and some more explanations please take a look at README.m
                 self.showConfig()
             case "make-config":
                 self.makeConfig()
+            case "init":
+                self.fullUpload()
             case "help":
                 self.showHelp()
+            case "test":
+                self.test()
             case _:
                 self.showHelp()
         return True
