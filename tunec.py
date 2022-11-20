@@ -59,7 +59,7 @@ class ComposerSync:
     packagesToUpload = []
 
     def __init__(self):
-        # self.loadConfig()
+        self.loadConfig()
         # self.getRemoteConnection()
         return
 
