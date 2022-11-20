@@ -2,3 +2,5 @@
 /vendor/
 /tunec.yaml
 /.php_cs.cache
+composer.lock
+composer.json
