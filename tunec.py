@@ -147,8 +147,7 @@ class ComposerSync:
     def getRemotePackages(self):
         temporaryRemoteComposerFile = self.tempRemoteComposerLockFile
         ftp = self.getRemoteConnection()
-        ftp.cwd(self.config['remote']['remote-root'])
-        # ftp.retrlines('composer.lock')
+        ftp.cwd(self.config['remote']['remote-root'])        
         with open(temporaryRemoteComposerFile, 'wb') as fp:
             ftp.retrbinary('RETR composer.lock', fp.write)
         f = open(temporaryRemoteComposerFile)        
@@ -164,63 +163,6 @@ class ComposerSync:
             elif properties['type'] == 'dir':
                 self.remove_ftp_dir(ftp, f"{path}/{name}")
         ftp.rmd(path)
-
-    def getRemoteDirs(self, path):
-        remoteFtpEntries = []
-        self.ftp.cwd(path)
-        self.ftp.retrlines('LIST', remoteFtpEntries.append)
-        dirlist = []
-        for line in remoteFtpEntries:
-            regexp = "^(?P<perm>[Sldrwx\-]{10})(?:\s+)(?P<cos>\d+)(?:\s+)(?P<user>\w+)(?:\s+)(?P<group>\w+)(?:\s+)(?P<size>\d+)(?:\s+)(?P<month>\w+)(?:\s+)(?P<day>\d+)(?:\s+)(?P<timeyear>[0-9\:]+)(?:\s+)(?P<filename>.*)"
-            entry = re.match(regexp, line)
-            if ((re.match("^d", entry.group('perm'))) and (not re.match("^\.", entry.group('filename')))):
-                dirlist.append(entry.group('filename'))
-        return dirlist
-
-    def uploadThis(self, ftp, path):
-        print("Uploading folder: ", path)
-        files = os.listdir(path)
-        remoteFtpEntries = []
-        ftp.retrlines('LIST', remoteFtpEntries.append)
-        filelist = []
-        dirlist = []
-        for line in remoteFtpEntries:
-            regexp = "^(?P<perm>[Sldrwx\-]{10})(?:\s+)(?P<cos>\d+)(?:\s+)(?P<user>\w+)(?:\s+)(?P<group>\w+)(?:\s+)(?P<size>\d+)(?:\s+)(?P<month>\w+)(?:\s+)(?P<day>\d+)(?:\s+)(?P<timeyear>[0-9\:]+)(?:\s+)(?P<filename>.*)"
-            entry = re.match(regexp, line)
-            # print(entry.group('perm'))
-            if ((re.match("^d", entry.group('perm'))) and (not re.match("^\.", entry.group('filename')))):
-                dirlist.append(entry.group('filename'))
-            if (re.match("^\-", entry.group('perm'))):
-                filelist.append(entry.group('filename'))
-
-        # print(dirlist)
-        # print(filelist)
-
-            # print(entry.group('user'))
-
-        for f in files:
-            print(f)
-            absFile = os.path.abspath(os.path.join(os.curdir, path, f))
-        #     print("file", absFile, os.path.isfile(absFile))
-            if os.path.isfile(os.path.join(os.curdir, path, f)):
-                fh = open(absFile, 'rb')
-                command = 'STOR %s' % os.path.join(path, f)
-                self.prepareRemoteDir(
-                    ftp, os.path.dirname(os.path.join(path, f)))
-                print(command)
-                ftp.storbinary(command, fh)
-                fh.close()
-                #     elif os.path.isdir(path + r'\{}'.format(f)):
-                #         ftp.mkd(f)
-                #         ftp.cwd(f)
-                #         self.uploadThis(path + r'\{}'.format(f))
-                # ftp.cwd('..')
-                # os.chdir('..')
-
-    def prepareRemoteDir(self, ftp, file):
-        path = re.split("/", file)
-        remoteDirs = self.getRemoteDirs('')
-        print(remoteDirs)
 
     def getRemoteConnection(self):
         ftp = FTP(self.config['remote']['url'])
@@ -244,24 +186,14 @@ class ComposerSync:
         else:
             print(message().iOk(), end='')
             print("Package {} removed".format(package['name']))
-
+    ###
+    #
+    #
+    #
     def removeRemotePackages(self):
         packages = self.packagesToRemove
         for package in packages:
             self.removeRemotePackage(package)
-
-    ###
-    #
-    # UPDATE packages
-    #
-
-    def updateRemotePackage(self, package):
-        ftp = self.getRemoteConnection()
-
-    def updateRemotePackages(self, packages):
-        for package in packages:
-            print("updating: {}".format(package['name']))
-
 
     def makeArchive(self, items):
         print(message().iInfo() + f"Creating archive for {items}")
@@ -353,7 +285,6 @@ class ComposerSync:
     #
     # removes local temp files
     #
-
     def cleanUpLocal(self):
         if(os.path.exists(self.archiveTempFile)):
             os.remove(self.archiveTempFile)
@@ -366,7 +297,6 @@ class ComposerSync:
     #
     # removes remote remp files
     #
-
     def cleanUpRemote(self):
         phpFileFtp = "/" + self.config['remote']['public-web-path'].strip("/") + "/" + self.phpTempFile.strip("/")
         self.ftp.delete(phpFileFtp)
@@ -378,19 +308,6 @@ class ComposerSync:
     #
     # UPLOAD packages
     #
-    def uploadRemotePackageTest(self, package):
-        self.removeRemotePackage(package)
-        print("uploading: {}".format(package['name']))
-        ftp = self.getRemoteConnection()
-        self.uploadThis(ftp, "vendor/" + package['name'])
-
-    def uploadRemotePackage(self, package):
-        directory = pathlib.Path("vendor/" + package['name'])
-        with ZipFile("vendor.zip", "a", ZIP_DEFLATED, compresslevel=9) as archive:
-            for file_path in directory.rglob("*"):
-                archive.write(
-                    file_path, arcname=file_path.relative_to(directory))
-
     def uploadComposerPackages(self):
         packages = self.packagesToUpload + self.packagesToUpdate
         allOk = True
@@ -413,10 +330,6 @@ class ComposerSync:
     #
     # UPDATE composer files
     #
-
-    def updateRemoteComposer(self):
-        ftp = self.getRemoteConnection()
-
     def compareComposerFiles(self):
         print("Comparing composer.lock files...")
         localComposer = self.getLocalPackages()
@@ -499,7 +412,9 @@ class ComposerSync:
             print("Nothing to do. Everything seems to up to date.\n")
         print(message().iOk() + "Done.\n")        
         return True
-
+    #
+    #
+    #
     def fullUpload(self):
         self.loadConfig()
         self.getRemoteConnection()        
@@ -515,7 +430,9 @@ class ComposerSync:
         self.cleanUpLocal()
         self.cleanUpRemote()         
         return True
-
+    #
+    #
+    #
     def showConfig(self):
         print("Current config is:")
         for section in self.config.sections():
@@ -524,7 +441,9 @@ class ComposerSync:
                 print("   {} = {}".format(key, self.config[section][key]))
         print("\n")
         return True
-
+    #
+    #
+    #
     def showHelp(self):
         helpTxt = "\nUsage:\n\
 \t{} command [options]\n\n\
@@ -572,6 +491,8 @@ For more detailed help and some more explanations please take a look at README.m
                 self.showHelp()
         return True
 
-
+#
+# start main procedure
+#
 sync = ComposerSync()
 sync.run()
