@@ -10,7 +10,7 @@ Requirements:
 
 ## Why?
 
-Because I'm tired of uploading +800MB of files everytime one library is updated. Even with zip it takes too much time.
+Because I'm tired of uploading +800MB of files everytime one library is updated. It takes too much time.
 
 ## How to?
 
