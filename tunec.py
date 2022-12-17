@@ -149,7 +149,13 @@ class ComposerSync:
         ftp = self.getRemoteConnection()
         ftp.cwd(self.config['remote']['remote-root'])        
         with open(temporaryRemoteComposerFile, 'wb') as fp:
-            ftp.retrbinary('RETR composer.lock', fp.write)
+            try:
+                ftp.retrbinary('RETR composer.tunec.lock', fp.write)
+            except Exception as e:
+                errorcode_string = str(e).split(None, 1)[0]
+                if(errorcode_string == '550'):
+                    ftp.retrbinary('RETR composer.lock', fp.write)
+
         f = open(temporaryRemoteComposerFile)        
         remoteComposer = json.load(f)
         return remoteComposer
@@ -363,8 +369,7 @@ class ComposerSync:
             if not (packageName in localPackages):
                 remotePackage = remotePackages[packageName]
                 packagesToRemove.append(remotePackage)
-
-        print("Packages to update:")
+        
         if(len(packagesToUpdate) == 0):
             print("(none)")
         else: 
@@ -372,14 +377,14 @@ class ComposerSync:
                 print("\t{}\t\tlocal: {}\tremote: {}".format(package['name'], localPackages[package['name']]['version'], remotePackages[package['name']]['version']))   
             
         print("\nPackages to upload:")
-        if(len(packagesToUpdate) == 0):
+        if(len(packagesToUpload) == 0):
             print("(none)")
         else:
             for package in packagesToUpload:
                 print("\t{}\t\tlocal: {}".format(package['name'], localPackages[package['name']]['version']))        
 
         print("\nPackages to remove:")
-        if(len(packagesToUpdate) == 0):
+        if(len(packagesToRemove) == 0):
             print("(none)")
         else:        
             for package in packagesToRemove:
@@ -407,10 +412,19 @@ class ComposerSync:
             self.makePhpExtractScript()
             self.extractRemote()
             self.cleanUpLocal()
-            self.cleanUpRemote()       
+            self.cleanUpRemote()
+            self.pushOurComposerConf() 
         else:
             print("Nothing to do. Everything seems to up to date.\n")
         print(message().iOk() + "Done.\n")        
+        return True
+
+    def pushOurComposerConf(self):
+        ftp = self.getRemoteConnection()
+        localFile = 'composer.lock'
+        fh = open(localFile, 'rb')
+        remoteFile = self.config['remote']['remote-root'].strip("/") + "/composer.tunec.lock"
+        ftp.storbinary(f"STOR {remoteFile}", fh)
         return True
     #
     #
